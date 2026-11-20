@@ -14,11 +14,14 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 from . import __version__
+from .app_logic import click_boundaries
 from .audio import SUPPORTED_EXTENSIONS, Audio, WaveformEnvelope
 from .export import format_timestamp, write_export
 from .model import Segment, Structure
+from .neural import analyze_neural, check_python, find_python
 from .player import PlaybackError, Player
 from .render import BACKGROUND, PLAYHEAD, draw_structure, render_png
+from .settings import load_settings, save_settings
 
 APP_NAME = "SongStructurer"
 STANDARD_LABELS = (
@@ -96,6 +99,9 @@ class App(tk.Tk):
         self.envelope: WaveformEnvelope | None = None
         self.structure: Structure | None = None
         self.metadata: dict[str, Any] = {}
+        self.analysis: Any | None = None
+        self.settings = load_settings()
+        self.engine = tk.StringVar(value=self.settings["engine"])
         self.view: tuple[float, float] = (0.0, 1.0)
         self.playhead_time = 0.0
 
@@ -138,6 +144,9 @@ class App(tk.Tk):
         self._export_menu.add_command(
             label="Immagine PNG…", command=lambda: self.export_dialog(".png")
         )
+        self._export_menu.add_command(
+            label="Traccia guida con beep (MP3/WAV)…", command=self.export_click_track
+        )
         file_menu.add_cascade(label="Esporta", menu=self._export_menu)
         file_menu.add_separator()
         file_menu.add_command(label="Esci", command=self.quit_app)
@@ -155,6 +164,22 @@ class App(tk.Tk):
 
         analysis = tk.Menu(menubar, tearoff=False)
         analysis.add_command(label="Analizza struttura", command=self.analyze)
+        analysis.add_separator()
+        analysis.add_radiobutton(
+            label="Motore classico (integrato, veloce)",
+            variable=self.engine,
+            value="classic",
+            command=self._on_engine_changed,
+        )
+        analysis.add_radiobutton(
+            label="Motore neurale (allin1, Python esterno)",
+            variable=self.engine,
+            value="neural",
+            command=self._on_engine_changed,
+        )
+        analysis.add_command(
+            label="Configura Python per il motore neurale…", command=self.configure_neural
+        )
         self._analysis_menu = analysis
         menubar.add_cascade(label="Analisi", menu=analysis)
 
@@ -355,6 +380,7 @@ class App(tk.Tk):
         self.player.load(self.audio.samples, self.audio.sr)
         self.structure = Structure(self.audio.duration)
         self.metadata = {"file": self.audio.path.name if self.audio.path else ""}
+        self.analysis = None
         self.view = (0.0, self.audio.duration)
         self.playhead_time = 0.0
         name = self.audio.path.name if self.audio.path else ""
@@ -367,6 +393,26 @@ class App(tk.Tk):
         if self.audio is None or self._busy:
             return
         audio = self.audio
+        if self.engine.get() == "neural":
+            python = find_python(self.settings["neural_python"])
+            if python is None or audio.path is None:
+                messagebox.showinfo(
+                    APP_NAME,
+                    "Il motore neurale usa un Python esterno in cui è installato allin1.\n\n"
+                    "Indicalo da Analisi → Configura Python per il motore neurale…\n"
+                    "Per ora uso il motore classico.",
+                    parent=self,
+                )
+                python = None
+
+            if python is not None:
+                path, duration = audio.path, audio.duration
+
+                def neural_work(report: Callable[[float, str], None]) -> Any:
+                    return analyze_neural(path, duration, python, progress=report)
+
+                self._run_task(neural_work, self._on_analyzed, "Analisi neurale…")
+                return
 
         def work(report: Callable[[float, str], None]) -> Any:
             from .analysis import analyze
@@ -375,17 +421,59 @@ class App(tk.Tk):
 
         self._run_task(work, self._on_analyzed, "Analisi della struttura…")
 
+    def _on_engine_changed(self) -> None:
+        self.settings["engine"] = self.engine.get()
+        save_settings(self.settings)
+
+    def configure_neural(self) -> None:
+        """Pick the interpreter where allin1 is installed and verify it."""
+        if self._busy:
+            return
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Scegli l'interprete Python in cui è installato allin1",
+            filetypes=[("Python", "python.exe python python3"), ("Tutti i file", "*.*")],
+        )
+        if not path:
+            return
+
+        def work(report: Callable[[float, str], None]) -> tuple[str, bool, str]:
+            report(0.3, "Verifica di allin1")
+            ok, detail = check_python(path)
+            return path, ok, detail
+
+        def done(outcome: tuple[str, bool, str]) -> None:
+            chosen, ok, detail = outcome
+            if not ok:
+                self.status.set("Interprete non valido per il motore neurale.")
+                messagebox.showerror(
+                    APP_NAME,
+                    f"In questo Python non riesco a importare allin1 e torch:\n{detail}",
+                    parent=self,
+                )
+                return
+            self.settings["neural_python"] = chosen
+            self.settings["engine"] = "neural"
+            self.engine.set("neural")
+            save_settings(self.settings)
+            self.status.set(f"Motore neurale pronto (allin1 e torch: {detail}).")
+
+        self._run_task(work, done, "Verifica dell'interprete…")
+
     def _on_analyzed(self, result: Any) -> None:
         if self.audio is None:
             return
+        self.analysis = result
         segments = [Segment(s.start, s.end, s.label, s.group) for s in result.sections]
         if self.structure is not None:
             # Keeps the edit history, so that a re-analysis can be undone.
             self.structure.replace_all(segments)
         else:
             self.structure = Structure(self.audio.duration, segments)
-        self.metadata.update({"tempo_bpm": result.tempo, "key": result.key})
-        parts = []
+        self.metadata.update(
+            {"tempo_bpm": result.tempo, "key": result.key, "engine": result.engine}
+        )
+        parts = ["motore neurale" if result.engine == "neural" else "motore classico"]
         if result.tempo:
             parts.append(f"{result.tempo:.0f} BPM")
         if result.key:
@@ -424,6 +512,40 @@ class App(tk.Tk):
             messagebox.showerror(APP_NAME, f"Esportazione non riuscita:\n{exc}", parent=self)
             return
         self.status.set(f"Esportato: {path}")
+
+    def export_click_track(self) -> None:
+        """Save the song mixed with beat clicks and section-change risers."""
+        if self.structure is None or self.audio is None or self._busy:
+            return
+        if self.analysis is None or not self.analysis.beat_times:
+            messagebox.showinfo(
+                APP_NAME, "Serve un'analisi completata per conoscere i beat.", parent=self
+            )
+            return
+        stem = self.audio.path.stem if self.audio.path else "brano"
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Esporta traccia guida",
+            defaultextension=".mp3",
+            initialfile=f"{stem}.click.mp3",
+            filetypes=[("MP3", "*.mp3"), ("WAV", "*.wav"), ("FLAC", "*.flac")],
+        )
+        if not path:
+            return
+        audio, analysis = self.audio, self.analysis
+        boundaries = click_boundaries(self.structure)
+
+        def work(report: Callable[[float, str], None]) -> str:
+            from .sonify import sonify, write_click_track
+
+            report(0.3, "Sintesi dei beep")
+            mixed = sonify(
+                audio.samples, audio.sr, analysis.beat_times, analysis.downbeat_times, boundaries
+            )
+            report(0.7, "Scrittura del file")
+            return str(write_click_track(path, mixed, audio.sr))
+
+        self._run_task(work, lambda saved: self.status.set(f"Esportato: {saved}"), "Traccia guida…")
 
     def show_about(self) -> None:
         messagebox.showinfo(
@@ -730,8 +852,10 @@ class App(tk.Tk):
         for entry in (3, 4, 5):
             self._edit_menu.entryconfigure(entry, state=state(ready))
         self._analysis_menu.entryconfigure(0, state=state(ready))
-        for entry in range(4):
+        for entry in range(5):
             self._export_menu.entryconfigure(entry, state=state(ready))
+        for entry in (2, 3, 4):
+            self._analysis_menu.entryconfigure(entry, state=state(not self._busy))
 
     # ------------------------------------------------------------ interaction
 

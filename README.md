@@ -17,7 +17,10 @@ Tutto gira in locale: nessun upload, nessuna connessione, nessun modello da scar
   BPM e tonalità stimati
 - **Timeline modificabile**: trascina i confini, dividi, unisci, rinomina, annulla/ripeti
 - **Riproduzione**: brano intero o singola sezione, seek con un clic sulla forma d'onda
+- **Traccia guida**: il brano con i beep sui beat e la raffica di clic che annuncia ogni
+  cambio di sezione, in MP3, WAV o FLAC
 - **Esportazione**: CSV (millisecondi), JSON, etichette Audacity, PNG
+- **Motore neurale opzionale**: lo stesso modello All-In-One usato da vari analizzatori online
 - **Riga di comando**: `songstructurer analyze brano.mp3 -o brano.json`
 
 ## Installazione
@@ -65,6 +68,27 @@ Quattro brani sono un campione piccolo: i numeri indicano l'ordine di grandezza,
 garanzia. I servizi online basati su reti neurali addestrate su migliaia di brani annotati
 restano più precisi, in particolare nel dare il nome giusto alle sezioni.
 Per ripetere la misura: `python tools/benchmark.py CARTELLA_AUDIO CARTELLA_JAMS`.
+
+## Motore neurale (opzionale)
+
+Il motore integrato è DSP classico. Per etichette più affidabili e per i downbeat si può usare
+[All-In-One](https://github.com/mir-aidj/all-in-one) (`allin1`), che richiede PyTorch e Demucs:
+diversi gigabyte, quindi non sta nell'eseguibile. SongStructurer lo avvia in un interprete Python
+esterno:
+
+1. in un ambiente Python a parte installa `allin1` seguendo le istruzioni del progetto
+   (con una build CUDA di torch l'analisi dura secondi invece di minuti);
+2. in SongStructurer: **Analisi → Configura Python per il motore neurale…** e scegli il
+   `python.exe` di quell'ambiente. L'app verifica che `allin1` e `torch` si importino;
+3. da quel momento **Analizza** usa il motore neurale. Dal menu Analisi si torna al classico.
+
+In alternativa: variabile d'ambiente `SONGSTRUCTURER_PYTHON`, oppure da riga di comando
+`songstructurer analyze brano.mp3 --engine neural --python C:\percorso\python.exe`.
+
+Al primo uso `allin1` scarica i pesi del modello: serve la connessione.
+
+Stato: l'integrazione è collaudata con un modulo `allin1` simulato (avvio dell'interprete,
+scambio dei dati, errori). **Non è stata ancora provata con il modello reale.**
 
 ## Sviluppo
 

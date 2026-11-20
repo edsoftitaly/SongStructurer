@@ -95,6 +95,9 @@ class AnalysisResult:
     key: str
     sections: list[Section]
     beat_times: list[float] = field(default_factory=list)
+    #: Only the neural engine knows where the bars start.
+    downbeat_times: list[float] = field(default_factory=list)
+    engine: str = "classic"
 
 
 def _noop_progress(_fraction: float, _message: str) -> None:

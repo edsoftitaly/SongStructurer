@@ -54,12 +54,18 @@ Menu **File → Esporta**:
 - **JSON**: sezioni più nome del file, BPM e tonalità
 - **Etichette Audacity (TXT)**: `inizio<TAB>fine<TAB>etichetta`, tempi in secondi
 - **PNG**: l'intero brano con sezioni ed etichette
+- **Traccia guida con beep**: il brano originale più un clic su ogni beat (più acuto sul primo
+  movimento della battuta, solo con il motore neurale). Nei 4 secondi prima di ogni cambio di
+  sezione parte una raffica di 25 clic sempre più ravvicinati e sempre più acuti, e sul cambio
+  uno sweep discendente. Usa i confini come li vedi nella timeline, correzioni comprese.
 
 ## Riga di comando
 
 ```bash
 songstructurer analyze brano.mp3                # JSON su standard output
 songstructurer analyze brano.mp3 -o brano.csv   # il formato dipende dall'estensione
+songstructurer click brano.mp3 -o brano.click.mp3   # traccia guida con i beep
+songstructurer analyze brano.mp3 --engine neural   # motore neurale (vedi README)
 songstructurer --selftest                       # verifica che il motore di analisi funzioni
 ```
 

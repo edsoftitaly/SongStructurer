@@ -14,6 +14,18 @@ Riscrittura completa.
 - Stima di BPM e tonalità, riconoscimento del silenzio iniziale e finale.
 - Le sezioni coprono tutto il brano, da 0 alla fine, senza buchi.
 
+### Motore neurale (opzionale)
+- Analisi con il modello All-In-One (`allin1`): etichette funzionali apprese
+  (intro, verse, chorus, bridge, inst, solo, break, outro), beat e downbeat.
+  Gira in un interprete Python esterno scelto dall'utente, così l'eseguibile
+  resta leggero. Il motore classico resta quello predefinito.
+
+### Traccia guida
+- Esportazione del brano con i beep: clic su ogni beat (più acuto sul primo
+  movimento se il motore conosce i downbeat), raffica di clic che accelera e
+  sale di tono nei 4 secondi prima di ogni cambio di sezione, sweep discendente
+  sul cambio. MP3, WAV o FLAC. Segue i confini corretti a mano.
+
 ### Applicazione
 - Caricamento e analisi in background: la finestra non si blocca più.
 - Riproduzione dalla memoria con seek reale, play/pausa dell'intero brano e
@@ -30,7 +42,7 @@ Riscrittura completa.
   etichette Audacity, PNG dell'intero brano.
 
 ### Progetto
-- Pacchetto Python installabile, riga di comando (`songstructurer analyze`),
+- Pacchetto Python installabile, riga di comando (`songstructurer analyze`, `click`),
   test automatici, lint.
 - Build e release automatiche con GitHub Actions: l'eseguibile Windows viene
   costruito, collaudato e pubblicato quando su `main` arriva una nuova versione.

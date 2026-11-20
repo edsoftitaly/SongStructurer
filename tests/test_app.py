@@ -15,7 +15,10 @@ pytestmark = pytest.mark.gui
 
 
 @pytest.fixture
-def app():
+def app(tmp_path, monkeypatch):
+    # Never read or write the real settings of whoever runs the tests.
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     try:
         from songstructurer.app import App
 
@@ -37,7 +40,7 @@ def pump(app, condition, timeout=120.0):
     raise AssertionError("timeout")
 
 
-def test_open_analyze_edit_export(app, song, tmp_path):
+def test_open_analyze_edit_export(app, song, tmp_path, monkeypatch):
     signal, sr, _ = song
     source = tmp_path / "song.wav"
     sf.write(source, signal, sr)
@@ -71,6 +74,12 @@ def test_open_analyze_edit_export(app, song, tmp_path):
     app.toggle_play()
     assert not app.player.playing
 
+    target = tmp_path / "song.click.wav"
+    monkeypatch.setattr("songstructurer.app.filedialog.asksaveasfilename", lambda **_k: str(target))
+    app.export_click_track()
+    pump(app, lambda: not app._busy and target.exists(), timeout=60)
+    assert sf.info(str(target)).duration == pytest.approx(app.audio.duration, abs=0.05)
+
     app.analyze()
     pump(app, lambda: not app._busy and len(app.structure) == 4)
     app.undo()  # a re-analysis can be undone
@@ -87,3 +96,18 @@ def test_bad_file_reports_error(app, tmp_path, monkeypatch):
     app.open_file(bad)
     pump(app, lambda: bool(shown), timeout=30)
     assert not app._busy and app.audio is None
+
+
+def test_neural_engine_without_interpreter_falls_back(app, song, tmp_path, monkeypatch):
+    shown = []
+    monkeypatch.setattr(
+        "songstructurer.app.messagebox.showinfo", lambda *args, **kwargs: shown.append(args)
+    )
+    monkeypatch.setattr("songstructurer.app.find_python", lambda _configured: None)
+    signal, sr, _ = song
+    source = tmp_path / "song.wav"
+    sf.write(source, signal, sr)
+    app.engine.set("neural")
+    app.open_file(source)
+    pump(app, lambda: app.analysis is not None and not app._busy)
+    assert shown and app.analysis.engine == "classic" and len(app.structure) == 4

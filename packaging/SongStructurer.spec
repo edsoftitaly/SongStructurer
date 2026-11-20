@@ -11,7 +11,8 @@ a = Analysis(
     [str(here / "launcher.py")],
     pathex=[str(here.parent / "src")],
     binaries=[],
-    datas=collect_data_files("librosa"),
+    datas=collect_data_files("librosa")
+    + [(str(here.parent / "src" / "songstructurer" / "neural_worker.py"), "songstructurer")],
     hiddenimports=["matplotlib.backends.backend_tkagg"],
     hookspath=[],
     hooksconfig={"matplotlib": {"backends": ["TkAgg", "Agg"]}},
