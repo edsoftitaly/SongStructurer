@@ -33,7 +33,7 @@ Riscrittura completa.
 - Pacchetto Python installabile, riga di comando (`songstructurer analyze`),
   test automatici, lint.
 - Build e release automatiche con GitHub Actions: l'eseguibile Windows viene
-  costruito, collaudato e pubblicato a ogni tag `v*`.
+  costruito, collaudato e pubblicato quando su `main` arriva una nuova versione.
 - Rimossi dal file .spec il percorso assoluto di una cartella personale e UPX.
 
 ## [1.0] - 2025-09-29

@@ -78,7 +78,10 @@ pyinstaller --noconfirm --clean packaging/SongStructurer.spec
 ### Pubblicare una release
 
 1. aggiorna `__version__` in `src/songstructurer/__init__.py` e `CHANGELOG.md`;
-2. crea e pubblica il tag: `git tag v2.0.1 && git push origin v2.0.1`.
+2. porta la modifica su `main` (merge della pull request).
+
+Quando su `main` arriva un numero di versione che non ha ancora un tag, la release parte da
+sola. In alternativa si può pubblicare un tag `vX.Y.Z` a mano: deve coincidere con `__version__`.
 
 GitHub Actions esegue i test, costruisce l'eseguibile Windows, lo collauda (`--selftest`),
 calcola lo SHA-256 e pubblica la release con le note prese dal changelog.
