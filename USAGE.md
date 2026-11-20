@@ -59,6 +59,20 @@ Menu **File → Esporta**:
   sezione parte una raffica di 25 clic sempre più ravvicinati e sempre più acuti, e sul cambio
   uno sweep discendente. Usa i confini come li vedi nella timeline, correzioni comprese.
 
+- **Accordi (TXT Audacity)**: la sequenza di accordi come traccia di etichette
+- **MIDI di melodia e basso**: due tracce, trascritte dagli stem di voce e basso. Se gli stem
+  non sono ancora stati separati in questa sessione, parte prima Demucs
+- **Stem separati (Demucs)**: un WAV per stem nella cartella scelta, 4 o 6 stem
+
+Stem e MIDI richiedono il Python esterno del motore neurale (vedi README).
+
+## Accordi
+
+Sotto la forma d'onda scorre la corsia degli accordi: i nomi compaiono quando lo zoom lascia
+abbastanza spazio. Il riconoscimento distingue triadi maggiori (`C`), minori (`Cm`) e quinte
+(`C5`); non riconosce settime, rivolti o accordi alterati. È una stima: sul materiale molto
+distorto o con accordature ribassate va presa con cautela.
+
 ## Riga di comando
 
 ```bash
@@ -66,6 +80,8 @@ songstructurer analyze brano.mp3                # JSON su standard output
 songstructurer analyze brano.mp3 -o brano.csv   # il formato dipende dall'estensione
 songstructurer click brano.mp3 -o brano.click.mp3   # traccia guida con i beep
 songstructurer analyze brano.mp3 --engine neural   # motore neurale (vedi README)
+songstructurer stems brano.mp3 -o cartella --model htdemucs_6s   # stem con Demucs
+songstructurer midi brano.mp3 -o brano.mid         # melodia e basso in MIDI
 songstructurer --selftest                       # verifica che il motore di analisi funzioni
 ```
 

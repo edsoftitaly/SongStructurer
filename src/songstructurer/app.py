@@ -18,7 +18,7 @@ from .app_logic import click_boundaries
 from .audio import SUPPORTED_EXTENSIONS, Audio, WaveformEnvelope
 from .export import format_timestamp, write_export
 from .model import Segment, Structure
-from .neural import analyze_neural, check_python, find_python
+from .neural import check_python, find_python
 from .player import PlaybackError, Player
 from .render import BACKGROUND, PLAYHEAD, draw_structure, render_png
 from .settings import load_settings, save_settings
@@ -100,6 +100,7 @@ class App(tk.Tk):
         self.structure: Structure | None = None
         self.metadata: dict[str, Any] = {}
         self.analysis: Any | None = None
+        self.stems: dict[str, Path] = {}
         self.settings = load_settings()
         self.engine = tk.StringVar(value=self.settings["engine"])
         self.view: tuple[float, float] = (0.0, 1.0)
@@ -147,6 +148,9 @@ class App(tk.Tk):
         self._export_menu.add_command(
             label="Traccia guida con beep (MP3/WAV)…", command=self.export_click_track
         )
+        self._export_menu.add_command(label="Accordi (TXT Audacity)…", command=self.export_chords)
+        self._export_menu.add_command(label="MIDI di melodia e basso…", command=self.export_midi)
+        self._export_menu.add_command(label="Stem separati (Demucs)…", command=self.export_stems)
         file_menu.add_cascade(label="Esporta", menu=self._export_menu)
         file_menu.add_separator()
         file_menu.add_command(label="Esci", command=self.quit_app)
@@ -381,6 +385,7 @@ class App(tk.Tk):
         self.structure = Structure(self.audio.duration)
         self.metadata = {"file": self.audio.path.name if self.audio.path else ""}
         self.analysis = None
+        self.stems = {}
         self.view = (0.0, self.audio.duration)
         self.playhead_time = 0.0
         name = self.audio.path.name if self.audio.path else ""
@@ -405,21 +410,16 @@ class App(tk.Tk):
                 )
                 python = None
 
-            if python is not None:
-                path, duration = audio.path, audio.duration
-
-                def neural_work(report: Callable[[float, str], None]) -> Any:
-                    return analyze_neural(path, duration, python, progress=report)
-
-                self._run_task(neural_work, self._on_analyzed, "Analisi neurale…")
-                return
+        else:
+            python = None
 
         def work(report: Callable[[float, str], None]) -> Any:
-            from .analysis import analyze
+            from .pipeline import full_analysis
 
-            return analyze(audio.mono(), audio.sr, progress=report)
+            return full_analysis(audio, python, progress=report)
 
-        self._run_task(work, self._on_analyzed, "Analisi della struttura…")
+        label = "Analisi neurale…" if python else "Analisi della struttura…"
+        self._run_task(work, self._on_analyzed, label)
 
     def _on_engine_changed(self) -> None:
         self.settings["engine"] = self.engine.get()
@@ -471,7 +471,15 @@ class App(tk.Tk):
         else:
             self.structure = Structure(self.audio.duration, segments)
         self.metadata.update(
-            {"tempo_bpm": result.tempo, "key": result.key, "engine": result.engine}
+            {
+                "tempo_bpm": result.tempo,
+                "key": result.key,
+                "engine": result.engine,
+                "chords": [
+                    {"start": round(c.start, 3), "end": round(c.end, 3), "name": c.name}
+                    for c in result.chords
+                ],
+            }
         )
         parts = ["motore neurale" if result.engine == "neural" else "motore classico"]
         if result.tempo:
@@ -546,6 +554,107 @@ class App(tk.Tk):
             return str(write_click_track(path, mixed, audio.sr))
 
         self._run_task(work, lambda saved: self.status.set(f"Esportato: {saved}"), "Traccia guida…")
+
+    def export_chords(self) -> None:
+        if self.audio is None or self.analysis is None or not self.analysis.chords:
+            self.status.set("Nessun accordo da esportare: serve un'analisi completata.")
+            return
+        stem = self.audio.path.stem if self.audio.path else "brano"
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Esporta accordi",
+            defaultextension=".txt",
+            initialfile=f"{stem}.accordi.txt",
+            filetypes=[("Etichette Audacity", "*.txt")],
+        )
+        if not path:
+            return
+        from .export import chords_to_labels
+
+        try:
+            Path(path).write_text(chords_to_labels(self.analysis.chords), encoding="utf-8")
+        except OSError as exc:
+            messagebox.showerror(APP_NAME, f"Esportazione non riuscita:\n{exc}", parent=self)
+            return
+        self.status.set(f"Esportato: {path}")
+
+    def _external_python(self) -> str | None:
+        """Interpreter for Demucs, or ``None`` after telling the user why."""
+        python = find_python(self.settings["neural_python"])
+        if python is None:
+            messagebox.showinfo(
+                APP_NAME,
+                "Stem e MIDI usano Demucs, che gira nel Python esterno del motore neurale.\n\n"
+                "Indicalo da Analisi → Configura Python per il motore neurale…",
+                parent=self,
+            )
+        return python
+
+    def export_stems(self) -> None:
+        """Separate the song into stems with Demucs."""
+        if self.audio is None or self.audio.path is None or self._busy:
+            return
+        python = self._external_python()
+        if python is None:
+            return
+        six = messagebox.askyesno(
+            APP_NAME,
+            "Separare anche chitarra e piano (6 stem)?\n\n"
+            "No = 4 stem: voce, basso, batteria, altro.",
+            parent=self,
+        )
+        folder = filedialog.askdirectory(parent=self, title="Cartella in cui salvare gli stem")
+        if not folder:
+            return
+        source = self.audio.path
+        model = "htdemucs_6s" if six else "htdemucs"
+
+        def work(report: Callable[[float, str], None]) -> dict[str, Path]:
+            from .stems import separate
+
+            return separate(source, folder, python, model=model, progress=report)
+
+        def done(stems: dict[str, Path]) -> None:
+            self.stems = stems
+            self.status.set(f"{len(stems)} stem salvati in {folder}")
+
+        self._run_task(work, done, "Separazione degli stem…")
+
+    def export_midi(self) -> None:
+        """Transcribe vocals and bass (from the stems) to a MIDI file."""
+        if self.audio is None or self.audio.path is None or self._busy:
+            return
+        have_stems = all(
+            name in self.stems and self.stems[name].is_file() for name in ("vocals", "bass")
+        )
+        python = None if have_stems else self._external_python()
+        if not have_stems and python is None:
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Esporta MIDI",
+            defaultextension=".mid",
+            initialfile=f"{self.audio.path.stem}.mid",
+            filetypes=[("MIDI", "*.mid")],
+        )
+        if not path:
+            return
+        audio, stems = self.audio, dict(self.stems) if have_stems else None
+        bpm = self.analysis.tempo if self.analysis is not None else 120.0
+
+        def work(report: Callable[[float, str], None]) -> tuple[Path, dict[str, int]]:
+            from .pipeline import export_midi
+
+            if stems is None:
+                report(0.1, "Separazione degli stem con Demucs (può richiedere alcuni minuti)")
+            return export_midi(path, audio, bpm, python, stems, progress=report)
+
+        def done(outcome: tuple[Path, dict[str, int]]) -> None:
+            saved, counts = outcome
+            detail = ", ".join(f"{name}: {count} note" for name, count in counts.items())
+            self.status.set(f"Esportato: {saved} ({detail})")
+
+        self._run_task(work, done, "Esportazione MIDI…")
 
     def show_about(self) -> None:
         messagebox.showinfo(
@@ -770,7 +879,10 @@ class App(tk.Tk):
             return
         selected = self.selected_indices() if self.structure is not None else []
         structure = self.structure if self.audio is not None else None
-        draw_structure(self.ax, self.envelope, structure, self.view, self._columns(), selected)
+        chords = self.analysis.chords if self.analysis is not None and structure else ()
+        draw_structure(
+            self.ax, self.envelope, structure, self.view, self._columns(), selected, chords
+        )
         self._playhead_artist = self.ax.axvline(
             self.playhead_time, color=PLAYHEAD, linewidth=1.4, animated=True
         )
@@ -852,7 +964,7 @@ class App(tk.Tk):
         for entry in (3, 4, 5):
             self._edit_menu.entryconfigure(entry, state=state(ready))
         self._analysis_menu.entryconfigure(0, state=state(ready))
-        for entry in range(5):
+        for entry in range(8):
             self._export_menu.entryconfigure(entry, state=state(ready))
         for entry in (2, 3, 4):
             self._analysis_menu.entryconfigure(entry, state=state(not self._busy))

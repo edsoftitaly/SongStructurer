@@ -77,12 +77,19 @@ def selftest(report_path: str | None) -> int:
         )
         mixed = sonify(signal, sr, result.beat_times, boundaries=found)
         report["click_track"] = bool(mixed.shape[0] == len(signal))
+        from .harmony import analyze_harmony
+        from .transcribe import transcribe
+
+        report["chords"] = len(analyze_harmony(signal, sr, result.beat_times)[1])
+        report["notes"] = len(transcribe(signal[: 4 * sr], sr, "vocals"))
         report["ok"] = (
             all(hits)
             and len(found) <= 5
             and len(set(groups)) < len(groups)
             and report["neural_worker"]
             and report["click_track"]
+            and report["chords"] > 0
+            and report["notes"] > 0
         )
     except Exception as exc:  # noqa: BLE001 - the report must say what broke
         report["error"] = f"{type(exc).__name__}: {exc}"
@@ -94,23 +101,24 @@ def selftest(report_path: str | None) -> int:
     return 0 if report["ok"] else 1
 
 
+def _python(engine: str, python: str | None, required: bool) -> str | None:
+    from .neural import find_python
+    from .settings import load_settings
+
+    if engine != "neural" and not required:
+        return None
+    interpreter = find_python(python or load_settings()["neural_python"])
+    if interpreter is None:
+        raise SystemExit("Nessun Python con allin1/demucs. Usa --python o SONGSTRUCTURER_PYTHON.")
+    return interpreter
+
+
 def _analyze(source: str, engine: str, python: str | None):
     from .audio import load_audio
+    from .pipeline import full_analysis
 
     audio = load_audio(source)
-    if engine == "neural":
-        from .neural import analyze_neural, find_python
-        from .settings import load_settings
-
-        interpreter = find_python(python or load_settings()["neural_python"])
-        if interpreter is None:
-            raise SystemExit(
-                "Motore neurale: nessun Python con allin1. Usa --python o SONGSTRUCTURER_PYTHON."
-            )
-        return audio, analyze_neural(source, audio.duration, interpreter)
-    from .analysis import analyze
-
-    return audio, analyze(audio.mono(), audio.sr)
+    return audio, full_analysis(audio, _python(engine, python, required=False))
 
 
 def _structure(audio, result):
@@ -131,6 +139,10 @@ def analyze_command(source: str, output: str | None, engine: str, python: str | 
         "tempo_bpm": result.tempo,
         "key": result.key,
         "engine": result.engine,
+        "chords": [
+            {"start": round(c.start, 3), "end": round(c.end, 3), "name": c.name}
+            for c in result.chords
+        ],
     }
     if output:
         write_export(output, structure, metadata)
@@ -150,23 +162,53 @@ def click_command(source: str, output: str, engine: str, python: str | None) -> 
     return 0
 
 
+def stems_command(source: str, output: str, model: str, python: str | None) -> int:
+    from .stems import separate
+
+    stems = separate(source, output, _python("neural", python, required=True), model=model)
+    if sys.stdout is not None:
+        for name, path in stems.items():
+            print(f"{name}\t{path}")
+    return 0
+
+
+def midi_command(source: str, output: str, engine: str, python: str | None) -> int:
+    from .pipeline import export_midi
+
+    audio, result = _analyze(source, engine, python)
+    interpreter = _python("neural", python, required=True)
+    _saved, counts = export_midi(output, audio, result.tempo, interpreter)
+    if sys.stdout is not None:
+        print(", ".join(f"{name}: {count} note" for name, count in counts.items()))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "--selftest":
         return selftest(args[1] if len(args) > 1 else None)
-    if args and args[0] in ("analyze", "click"):
+    if args and args[0] in ("analyze", "click", "midi", "stems"):
         command = args[0]
         parser = argparse.ArgumentParser(prog=f"songstructurer {command}")
         parser.add_argument("file")
-        if command == "analyze":
-            parser.add_argument("-o", "--output", help="file .json, .csv o .txt (Audacity)")
+        outputs = {
+            "analyze": (False, "file .json, .csv o .txt (Audacity)"),
+            "click": (True, "file .mp3, .wav o .flac"),
+            "midi": (True, "file .mid"),
+            "stems": (True, "cartella di destinazione"),
+        }
+        required, text = outputs[command]
+        parser.add_argument("-o", "--output", required=required, help=text)
+        if command == "stems":
+            parser.add_argument("--model", default="htdemucs", help="htdemucs o htdemucs_6s")
         else:
-            parser.add_argument("-o", "--output", required=True, help="file .mp3, .wav o .flac")
-        parser.add_argument("--engine", choices=("classic", "neural"), default="classic")
-        parser.add_argument("--python", help="interprete con allin1 (motore neurale)")
+            parser.add_argument("--engine", choices=("classic", "neural"), default="classic")
+        parser.add_argument("--python", help="interprete con allin1 e demucs")
         options = parser.parse_args(args[1:])
-        handler = analyze_command if command == "analyze" else click_command
-        return handler(options.file, options.output, options.engine, options.python)
+        if command == "stems":
+            return stems_command(options.file, options.output, options.model, options.python)
+        handler = {"analyze": analyze_command, "click": click_command, "midi": midi_command}
+        return handler[command](options.file, options.output, options.engine, options.python)
     parser = argparse.ArgumentParser(prog="songstructurer", description=__doc__.splitlines()[0])
     parser.add_argument("file", nargs="?", help="file audio da aprire")
     parser.add_argument("--version", action="version", version=f"SongStructurer {__version__}")

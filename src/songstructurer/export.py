@@ -90,3 +90,9 @@ def write_export(path: str | Path, structure: Structure, metadata: dict | None =
     encoding = "utf-8-sig" if suffix == ".csv" else "utf-8"
     path.write_text(text, encoding=encoding, newline="")
     return path
+
+
+def chords_to_labels(chords) -> str:
+    """Chord sequence as an Audacity label track."""
+    lines = [f"{c.start:.6f}\t{c.end:.6f}\t{c.name}" for c in chords if c.name != "N"]
+    return "\n".join(lines) + "\n"

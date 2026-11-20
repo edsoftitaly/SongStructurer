@@ -76,6 +76,7 @@ def draw_structure(
     view: tuple[float, float],
     columns: int = 1600,
     selected: Sequence[int] = (),
+    chords: Sequence = (),
 ) -> None:
     """Draw waveform, coloured segments, boundaries and labels for ``view``."""
     ax.clear()
@@ -125,6 +126,26 @@ def draw_structure(
         times, low, high = envelope.view(start, end, columns)
         if len(times):
             ax.fill_between(times, low, high, color=WAVEFORM, linewidth=0.6, alpha=0.95)
+
+    # Chord lane along the bottom; names appear once there is room for them.
+    for chord in chords:
+        if chord.end < start or chord.start > end or chord.name == "N":
+            continue
+        left, right = max(chord.start, start), min(chord.end, end)
+        room = (right - left) / (end - start) * columns
+        if chord.start >= start:
+            ax.axvline(chord.start, ymin=0.0, ymax=0.07, color=TEXT, linewidth=0.6, alpha=0.6)
+        if room >= 7 * len(chord.name) + 6:
+            ax.text(
+                (left + right) / 2,
+                -0.97,
+                chord.name,
+                ha="center",
+                va="center",
+                fontsize=7,
+                color=TEXT,
+                clip_on=True,
+            )
 
 
 def render_png(

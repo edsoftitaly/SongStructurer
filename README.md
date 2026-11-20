@@ -19,6 +19,10 @@ Tutto gira in locale: nessun upload, nessuna connessione, nessun modello da scar
 - **Riproduzione**: brano intero o singola sezione, seek con un clic sulla forma d'onda
 - **Traccia guida**: il brano con i beep sui beat e la raffica di clic che annuncia ogni
   cambio di sezione, in MP3, WAV o FLAC
+- **Accordi**: triadi maggiori, minori e quinte stimate sui beat, in una corsia sotto la forma
+  d'onda
+- **Stem e MIDI** (con Demucs): voce, basso, batteria, altro, più chitarra e piano con il
+  modello a 6 stem; melodia e basso trascritti in un file MIDI a due tracce
 - **Esportazione**: CSV (millisecondi), JSON, etichette Audacity, PNG
 - **Motore neurale opzionale**: lo stesso modello All-In-One usato da vari analizzatori online
 - **Riga di comando**: `songstructurer analyze brano.mp3 -o brano.json`
@@ -85,10 +89,15 @@ esterno:
 In alternativa: variabile d'ambiente `SONGSTRUCTURER_PYTHON`, oppure da riga di comando
 `songstructurer analyze brano.mp3 --engine neural --python C:\percorso\python.exe`.
 
-Al primo uso `allin1` scarica i pesi del modello: serve la connessione.
+Lo stesso interprete serve a **File → Esporta → Stem separati** e **MIDI di melodia e basso**:
+Demucs viene installato insieme ad `allin1`. Il MIDI nasce dagli stem di voce e basso, una nota
+alla volta: armonie vocali e accordi di basso non vengono trascritti.
 
-Stato: l'integrazione è collaudata con un modulo `allin1` simulato (avvio dell'interprete,
-scambio dei dati, errori). **Non è stata ancora provata con il modello reale.**
+Al primo uso `allin1` e Demucs scaricano i pesi dei modelli: serve la connessione.
+
+Stato: l'integrazione è collaudata con moduli `allin1` e `demucs` simulati (avvio
+dell'interprete, scambio dei dati, errori). **Non è stata ancora provata con i modelli reali.**
+Accordi e trascrizione sono collaudati su segnali sintetici, non su un set di brani annotati.
 
 ## Sviluppo
 

@@ -98,6 +98,8 @@ class AnalysisResult:
     #: Only the neural engine knows where the bars start.
     downbeat_times: list[float] = field(default_factory=list)
     engine: str = "classic"
+    #: ``harmony.Chord`` items, filled in by ``pipeline.full_analysis``.
+    chords: list = field(default_factory=list)
 
 
 def _noop_progress(_fraction: float, _message: str) -> None:
@@ -347,7 +349,7 @@ def assign_labels(
 
 _KS_MAJOR = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
 _KS_MINOR = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
-_PITCH_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
+PITCH_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
 
 
 def estimate_key(chroma_mean: np.ndarray) -> str:
@@ -362,7 +364,7 @@ def estimate_key(chroma_mean: np.ndarray) -> str:
             score = float(np.corrcoef(rotated, profile)[0, 1])
             if score > best_score:
                 best_score = score
-                best = _PITCH_NAMES[tonic] + suffix
+                best = PITCH_NAMES[tonic] + suffix
     return best
 
 
