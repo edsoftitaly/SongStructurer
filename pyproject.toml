@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "songstructurer"
+dynamic = ["version"]
+description = "Automatic song structure analysis with an editable timeline"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Edoardo Napoli" }]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "librosa>=0.10.2",
+    "soundfile>=0.12",
+    "matplotlib>=3.7",
+    "sounddevice>=0.4.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "ruff>=0.6"]
+build = ["pyinstaller>=6.6"]
+benchmark = ["mir_eval>=0.7"]
+
+[project.scripts]
+songstructurer = "songstructurer.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "songstructurer.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["gui: needs a display (Tk)"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests", "tools"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["B905"]

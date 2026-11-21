@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Test (Linux, virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python -m pytest -v
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        run: python -m pytest -v
+
+  build:
+    name: Build Windows executable
+    needs: test
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      release: ${{ steps.meta.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: python -m pip install ".[build]"
+      - name: Decide whether this run publishes a release
+        id: meta
+        shell: bash
+        run: |
+          version="$(python -c 'import songstructurer; print(songstructurer.__version__)')"
+          release=false
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match version $version"
+              exit 1
+            fi
+            release=true
+          elif [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            # A new version number landing on main is released automatically.
+            if ! git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+              release=true
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "version=$version release=$release"
+      - name: Build
+        run: pyinstaller --noconfirm --clean packaging/SongStructurer.spec
+      - name: Self-test the executable
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\SongStructurer.exe `
+            -ArgumentList '--selftest', 'selftest.json' -Wait -PassThru
+          if (Test-Path selftest.json) { Get-Content selftest.json }
+          if ($p.ExitCode -ne 0) { throw "self-test failed with exit code $($p.ExitCode)" }
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist\SongStructurer.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  SongStructurer.exe" | Out-File -Encoding ascii -NoNewline dist\SHA256SUMS.txt
+          Get-Content dist\SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SongStructurer-windows
+          path: |
+            dist/SongStructurer.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    if: needs.build.outputs.release == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: SongStructurer-windows
+          path: dist
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.build.outputs.version }}
+        run: |
+          python3 tools/release_notes.py "$TAG" > notes.md
+          gh release create "$TAG" \
+            dist/SongStructurer.exe dist/SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "SongStructurer $TAG" \
+            --notes-file notes.md
